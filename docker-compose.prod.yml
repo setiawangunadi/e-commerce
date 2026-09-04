@@ -16,6 +16,33 @@
 name: toko
 
 services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    deploy:
+      replicas: 2
+    command: ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?wajib diisi}
+    depends_on:
+      - web
+      - api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - web
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
   postgres:
     image: postgres:17-alpine
     restart: always
@@ -59,12 +86,41 @@ services:
       RATE_LIMIT_UMUM: ${RATE_LIMIT_UMUM:-300}
       RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10}
       TRUST_PROXY: ${TRUST_PROXY:-1}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@toko.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?wajib diisi}
+      SEED_STAFF_EMAIL: ${SEED_STAFF_EMAIL:-staff@toko.local}
+      SEED_STAFF_PASSWORD: ${SEED_STAFF_PASSWORD:?wajib diisi}
     volumes:
       # Gambar produk WAJIB berada di volume. Tanpa ini, seluruh gambar hilang
       # setiap kali container dibangun ulang.
       - uploads:/data/uploads
     ports:
       - '127.0.0.1:4000:4000'
+
+  # Tool sekali jalan untuk instalasi awal. Jalankan dengan:
+  # docker compose -f docker-compose.prod.yml --env-file .env.prod \
+  #   --profile tools run --rm seed
+  seed:
+    profiles: ['tools']
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: build
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?wajib diisi}
+      UPLOAD_DIR: /data/uploads
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@toko.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?wajib diisi}
+      SEED_STAFF_EMAIL: ${SEED_STAFF_EMAIL:-staff@toko.local}
+      SEED_STAFF_PASSWORD: ${SEED_STAFF_PASSWORD:?wajib diisi}
+    volumes:
+      - uploads:/data/uploads
+    working_dir: /app/apps/api
+    command: ['npx', '--no-install', 'tsx', 'prisma/seed.ts']
 
   web:
     build:
@@ -80,11 +136,15 @@ services:
         NEXT_PUBLIC_WHATSAPP: ${NEXT_PUBLIC_WHATSAPP:-6281234567890}
         NEXT_PUBLIC_MIDTRANS_PRODUKSI: ${NEXT_PUBLIC_MIDTRANS_PRODUKSI:-true}
     restart: always
+    environment:
+      INTERNAL_API_URL: http://api:4000
     depends_on:
       - api
     ports:
       - '127.0.0.1:3000:3000'
 
 volumes:
+  caddy-data:
+  caddy-config:
   postgres-data:
   uploads:

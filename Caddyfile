@@ -1,0 +1,13 @@
+{
+  email admin@zyrabelle.my.id
+}
+
+zyrabelle.my.id {
+  encode zstd gzip
+  reverse_proxy web:3000
+}
+
+api.zyrabelle.my.id {
+  encode zstd gzip
+  reverse_proxy api:4000
+}

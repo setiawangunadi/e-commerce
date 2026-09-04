@@ -37,7 +37,8 @@ WORKDIR /app
 RUN npm run build --workspace apps/api
 
 # Membuang dependency khusus development supaya tidak ikut ke image akhir.
-RUN npm prune --omit=dev --workspace apps/api --include-workspace-root
+FROM build AS production
+RUN npm prune --omit=dev --workspace apps/api --include-workspace-root --no-audit --no-fund
 
 # --- Tahap 3: runtime --------------------------------------------------------
 FROM node:${NODE_VERSION} AS runner
@@ -48,11 +49,11 @@ ENV NODE_ENV=production
 # Berjalan sebagai pengguna non-root. Image node sudah menyediakan user `node`.
 RUN mkdir -p /app/uploads && chown -R node:node /app
 
-COPY --from=build --chown=node:node /app/node_modules node_modules
-COPY --from=build --chown=node:node /app/apps/api/node_modules apps/api/node_modules
-COPY --from=build --chown=node:node /app/apps/api/dist apps/api/dist
-COPY --from=build --chown=node:node /app/apps/api/prisma apps/api/prisma
-COPY --from=build --chown=node:node /app/apps/api/package.json apps/api/package.json
+COPY --from=production --chown=node:node /app/node_modules node_modules
+COPY --from=production --chown=node:node /app/apps/api/dist apps/api/dist
+COPY --from=production --chown=node:node /app/apps/api/prisma apps/api/prisma
+COPY --from=production --chown=node:node /app/apps/api/prisma.config.ts apps/api/prisma.config.ts
+COPY --from=production --chown=node:node /app/apps/api/package.json apps/api/package.json
 
 USER node
 WORKDIR /app/apps/api

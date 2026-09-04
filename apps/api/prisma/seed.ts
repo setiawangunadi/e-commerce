@@ -18,29 +18,32 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL ?? 'http://localhost:4000';
 async function seedAdmin(): Promise<void> {
   const email = process.env.SEED_ADMIN_EMAIL ?? 'admin@toko.local';
   const password = process.env.SEED_ADMIN_PASSWORD ?? 'admin12345';
+  const staffEmail = process.env.SEED_STAFF_EMAIL ?? 'staff@toko.local';
+  const staffPassword = process.env.SEED_STAFF_PASSWORD;
+  if (!staffPassword) throw new Error('SEED_STAFF_PASSWORD wajib diisi');
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
   await prisma.adminUser.upsert({
     where: { email },
-    update: {},
+    update: { passwordHash },
     create: { email, nama: 'Admin Toko', passwordHash, role: 'ADMIN', aktif: true },
   });
 
   // Satu akun STAFF untuk menguji pembatasan RBAC (tidak bisa hapus produk).
   await prisma.adminUser.upsert({
-    where: { email: 'staff@toko.local' },
-    update: {},
+    where: { email: staffEmail },
+    update: { passwordHash: await argon2.hash(staffPassword, { type: argon2.argon2id }) },
     create: {
-      email: 'staff@toko.local',
+      email: staffEmail,
       nama: 'Staf Gudang',
-      passwordHash: await argon2.hash('staff12345', { type: argon2.argon2id }),
+      passwordHash: await argon2.hash(staffPassword, { type: argon2.argon2id }),
       role: 'STAFF',
       aktif: true,
     },
   });
 
   console.log(`  Admin  : ${email} / ${password}`);
-  console.log(`  Staff  : staff@toko.local / staff12345`);
+  console.log(`  Staff  : ${staffEmail} / ${staffPassword}`);
 }
 
 async function main(): Promise<void> {

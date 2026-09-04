@@ -1,6 +1,14 @@
 import type { MetaPaginasi } from './types';
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+// Server Components berbicara langsung lewat jaringan Compose. Browser tetap
+// memakai URL publik HTTPS; memutar request SSR kembali melalui Cloudflare
+// tidak andal pada host yang memblokir koneksi hairpin ke edge CDN.
+export const API_URL =
+  typeof window === 'undefined'
+    ? (process.env.INTERNAL_API_URL ?? PUBLIC_API_URL)
+    : PUBLIC_API_URL;
 const BASE = `${API_URL}/api/v1`;
 
 interface Envelope<T> {
