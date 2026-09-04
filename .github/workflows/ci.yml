@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Push beruntun ke branch yang sama membatalkan run sebelumnya — tidak ada
+# gunanya menunggu hasil dari commit yang sudah tertimpa.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  periksa:
+    name: Typecheck & unit test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependency
+        run: npm ci
+
+      # Prisma Client di-generate ke src/generated dan tidak ikut di-commit,
+      # jadi harus dibuat sebelum typecheck maupun test.
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit test
+        run: npm test
+
+  build:
+    name: Build produksi
+    runs-on: ubuntu-latest
+    needs: periksa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependency
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      # Build web menuntut NEXT_PUBLIC_* karena nilainya ter-inline ke bundel.
+      # Di CI cukup nilai contoh — yang diuji di sini adalah bahwa build-nya
+      # berhasil, bukan konfigurasi produksinya.
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.contoh.test
+          NEXT_PUBLIC_SITE_URL: https://contoh.test
+
+  migrasi:
+    name: Migrasi Prisma berjalan di database bersih
+    runs-on: ubuntu-latest
+
+    # Migrasi yang tidak bisa dijalankan dari nol adalah kegagalan deploy yang
+    # baru ketahuan saat menyiapkan environment baru.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ecommerce
+          POSTGRES_PASSWORD: ecommerce
+          POSTGRES_DB: ecommerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ecommerce"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependency
+        run: npm ci
+
+      # Perintah Prisma yang menyentuh database harus dijalankan dari apps/api:
+      # Prisma 7 memindahkan konfigurasi datasource ke prisma.config.ts, dan
+      # berkas itu dicari dari direktori kerja. Dari akar repo, `--schema` saja
+      # tidak cukup — perintahnya gagal dengan "datasource.url property is
+      # required in your Prisma config file".
+      - name: Jalankan migrasi
+        working-directory: apps/api
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://ecommerce:ecommerce@localhost:5432/ecommerce
+
+      # Database terpisah untuk langkah berikutnya. Prisma ME-RESET database
+      # shadow setiap kali memutar ulang migrasi — menunjuknya ke database utama
+      # akan menghapus hasil `migrate deploy` di atas, dan bila perintahnya
+      # disalin ke mesin lokal, ia menghapus data development.
+      - name: Siapkan shadow database
+        run: PGPASSWORD=ecommerce psql -h localhost -U ecommerce -d ecommerce -c 'CREATE DATABASE bayangan;'
+
+      # Memutar ulang seluruh migrasi ke database bersih, lalu membandingkan
+      # hasilnya dengan schema.prisma. Ada selisih (exit 2) berarti skema sudah
+      # diubah tapi migrasinya lupa dibuat — penyebab paling umum dari "jalan di
+      # lokal, gagal saat deploy".
+      - name: Pastikan tidak ada migrasi yang tertinggal
+        working-directory: apps/api
+        run: |
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema prisma/schema.prisma \
+            --exit-code
+        env:
+          DATABASE_URL: postgresql://ecommerce:ecommerce@localhost:5432/ecommerce
+          SHADOW_DATABASE_URL: postgresql://ecommerce:ecommerce@localhost:5432/bayangan

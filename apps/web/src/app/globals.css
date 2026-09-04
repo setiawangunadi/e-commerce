@@ -1,0 +1,66 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Palet diambil dari logo SRN Cullezione.
+   *
+   * Skalanya sengaja memuat kedua biru logo sekaligus: teal huruf "N" duduk di
+   * merek-500, navy huruf "S"/"R" di merek-800. Jadi warna antara bukan hasil
+   * karangan, melainkan jalur yang memang menghubungkan dua warna merek.
+   *
+   * Kuning logo jadi aksen, bukan warna utama. Teks putih di atas #f5b301 hanya
+   * berkontras sekitar 1,9:1 — jauh di bawah syarat 4,5:1 — jadi memakainya
+   * sebagai warna tombol akan membuat labelnya nyaris tak terbaca. */
+  --color-merek-50: #f0f7f9;
+  --color-merek-100: #daedf2;
+  --color-merek-200: #b6dbe6;
+  --color-merek-300: #86c1d3;
+  --color-merek-400: #4da1bb;
+  --color-merek-500: #1b7f97; /* teal huruf "N" */
+  --color-merek-600: #17697f;
+  --color-merek-700: #145466;
+  --color-merek-800: #123d5b; /* navy huruf "S" dan "R" */
+  --color-merek-900: #0d2b40;
+
+  --color-aksen-50: #fff9e6;
+  --color-aksen-100: #ffefb8;
+  --color-aksen-200: #ffe085;
+  --color-aksen-300: #fdd04d;
+  --color-aksen-400: #f9c024;
+  --color-aksen-500: #f5b301; /* kuning lingkaran logo */
+  --color-aksen-600: #d69a00;
+  --color-aksen-700: #ab7a00;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white text-neutral-800 antialiased;
+    font-family: var(--font-sans);
+  }
+
+  /* Fokus keyboard yang terlihat jelas di seluruh situs (aksesibilitas). */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-merek-600;
+  }
+}
+
+@layer components {
+  .kontainer-toko {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+}
+
+/* Menyembunyikan scrollbar pada baris kategori yang bisa digeser di mobile. */
+.tanpa-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tanpa-scrollbar::-webkit-scrollbar {
+  display: none;
+}

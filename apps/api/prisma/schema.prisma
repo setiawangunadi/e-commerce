@@ -1,0 +1,713 @@
+// Skema data inti e-commerce single-store.
+// Mengacu pada research/business/02-catalog-inventory.md (produk, varian, harga, stok)
+// dan research/tech/03-database.md.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+// Prisma 7: connection URL tidak lagi ditulis di sini — lihat apps/api/prisma.config.ts
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Admin
+// ---------------------------------------------------------------------------
+
+enum AdminRole {
+  ADMIN // akses penuh
+  STAFF // akses terbatas (tidak bisa ubah harga/hapus produk)
+}
+
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  nama         String
+  passwordHash String
+  role         AdminRole @default(STAFF)
+  aktif        Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("admin_users")
+}
+
+// ---------------------------------------------------------------------------
+// Katalog
+// ---------------------------------------------------------------------------
+
+enum ProductStatus {
+  DRAFT // belum tampil di katalog
+  PUBLISHED // tampil & bisa dibeli
+  ARCHIVED // tidak dijual lagi, disimpan untuk riwayat
+}
+
+model Category {
+  id        String  @id @default(uuid())
+  nama      String
+  slug      String  @unique
+  deskripsi String?
+  gambarUrl String?
+  urutan    Int     @default(0)
+  aktif     Boolean @default(true)
+
+  /// Kategori bertingkat: "Fashion" (induk) → "Pakaian Pria" (anak).
+  /// Hanya dua tingkat yang didukung — produk selalu melekat pada anak,
+  /// dan induk berfungsi sebagai pengelompokan di navigasi.
+  parentId String?
+  parent   Category?  @relation("IndukKategori", fields: [parentId], references: [id], onDelete: SetNull)
+  anak     Category[] @relation("IndukKategori")
+
+  products  Product[]
+  vouchers  VoucherCategory[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([aktif, urutan])
+  @@index([parentId])
+  @@map("categories")
+}
+
+// ---------------------------------------------------------------------------
+// Label promosi
+// ---------------------------------------------------------------------------
+
+/// Penanda promosi yang bisa ditempel ke produk mana pun lintas kategori,
+/// mis. "Flash Sale", "Diskon", "Terlaris". Satu produk boleh punya beberapa.
+model Label {
+  id     String  @id @default(uuid())
+  nama   String
+  slug   String  @unique
+  /// Warna latar lencana di etalase.
+  warna  String  @default("#c96442")
+  urutan Int     @default(0)
+  aktif  Boolean @default(true)
+
+  /// Jadwal tayang, terutama untuk Flash Sale yang hanya berlaku beberapa jam.
+  /// Kosong = berlaku selama `aktif`.
+  mulai   DateTime?
+  selesai DateTime?
+
+  produk ProductLabel[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([aktif, urutan])
+  @@map("labels")
+}
+
+model ProductLabel {
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  labelId   String
+  label     Label   @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([productId, labelId])
+  @@index([labelId])
+  @@map("product_labels")
+}
+
+// ---------------------------------------------------------------------------
+// Voucher diskon
+// ---------------------------------------------------------------------------
+
+enum VoucherType {
+  PERSEN // potongan sekian persen dari subtotal
+  NOMINAL // potongan rupiah tetap
+}
+
+model Voucher {
+  id        String      @id @default(uuid())
+  /// Kode yang diketik pembeli, selalu disimpan huruf besar.
+  kode      String      @unique
+  deskripsi String?
+  tipe      VoucherType
+  /// Persen (1–100) atau rupiah, tergantung `tipe`.
+  nilai     Int
+
+  /// Batas atas potongan untuk tipe PERSEN — tanpa ini diskon 50% pada
+  /// pesanan besar bisa menggerus margin habis.
+  maksPotongan Int?
+  minBelanja   Int  @default(0)
+
+  /// Kuota pemakaian total. Kosong = tak terbatas.
+  kuota    Int?
+  terpakai Int  @default(0)
+
+  mulai   DateTime?
+  selesai DateTime?
+  aktif   Boolean   @default(true)
+
+  /// Pembatasan cakupan. Bila keduanya kosong, voucher berlaku untuk
+  /// seluruh isi keranjang.
+  produk   VoucherProduct[]
+  kategori VoucherCategory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([aktif, kode])
+  @@map("vouchers")
+}
+
+model VoucherProduct {
+  voucherId String
+  voucher   Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([voucherId, productId])
+  @@map("voucher_products")
+}
+
+model VoucherCategory {
+  voucherId  String
+  voucher    Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([voucherId, categoryId])
+  @@map("voucher_categories")
+}
+
+/// Merek produk. Dulu hanya teks bebas di Product, sekarang entitas tersendiri
+/// supaya bisa dikelola admin, dipakai menyaring etalase, dan tidak melahirkan
+/// varian ejaan ("Nusakara" vs "nusakara") yang memecah katalog diam-diam.
+model Brand {
+  id        String  @id @default(uuid())
+  nama      String  @unique
+  slug      String  @unique
+  deskripsi String?
+  logoUrl   String?
+  urutan    Int     @default(0)
+  aktif     Boolean @default(true)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([aktif, urutan])
+  @@map("brands")
+}
+
+model Product {
+  id               String  @id @default(uuid())
+  nama             String
+  slug             String  @unique
+  deskripsi        String?
+  deskripsiSingkat String?
+  brandId          String?
+  brand            Brand?  @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  sku              String  @unique
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  // Harga disimpan sebagai Rupiah utuh (Int) — Rupiah tidak dipakai dalam pecahan sen.
+  harga      Int // harga jual
+  hargaCoret Int? // harga sebelum diskon, untuk badge promo
+  hpp        Int? // harga pokok penjualan, untuk kalkulasi margin (tidak pernah diekspos ke publik)
+
+  // Wajib untuk kalkulasi ongkir — lihat research/business/05-shipping-fulfillment.md
+  berat   Int // gram
+  panjang Int? // cm
+  lebar   Int? // cm
+  tinggi  Int? // cm
+
+  // Stok tingkat produk. Jika produk punya varian, stok efektif = jumlah stok varian.
+  stok        Int           @default(0)
+  stokMinimum Int           @default(5) // ambang low stock alert
+  status      ProductStatus @default(DRAFT)
+  unggulan    Boolean       @default(false) // tampil di section "Produk Unggulan" di home
+  kenaPpn     Boolean       @default(true)
+
+  metaTitle       String?
+  metaDescription String?
+
+  // Tautan produk yang sama di marketplace lain. Bila diisi, tombol beli
+  // kanal tersebut muncul di etalase — lihat research/business/14-omnichannel.md
+  linkShopee String?
+  linkTiktok String?
+
+  images     ProductImage[]
+  variants   ProductVariant[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  labels     ProductLabel[]
+  vouchers   VoucherProduct[]
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, unggulan])
+  @@index([status, createdAt])
+  @@index([categoryId, status])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  nama   String // contoh: "Merah - L"
+  sku    String  @unique
+  harga  Int? // null = ikut harga produk induk
+  stok   Int     @default(0)
+  aktif  Boolean @default(true)
+  urutan Int     @default(0)
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  images     ProductImage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, urutan])
+  @@map("product_variants")
+}
+
+// ---------------------------------------------------------------------------
+// Keranjang
+// ---------------------------------------------------------------------------
+
+/// Keranjang tamu. Diidentifikasi lewat `token` yang disimpan di cookie httpOnly,
+/// sehingga pembeli tidak perlu punya akun untuk belanja
+/// (guest checkout — lihat research/business/03-cart-checkout.md).
+model Cart {
+  id    String @id @default(uuid())
+  token String @unique
+
+  items CartItem[]
+
+  /// Diisi saat keranjang berhasil dikonversi jadi pesanan.
+  checkoutAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@map("carts")
+}
+
+model CartItem {
+  id     String @id @default(uuid())
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  /// Harga sengaja TIDAK disimpan di sini. Keranjang selalu membaca harga
+  /// terkini dari produk; harga baru dikunci saat pesanan dibuat.
+  jumlah Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Satu baris per kombinasi produk+varian — menambah item yang sama
+  // menaikkan jumlah, bukan membuat baris baru.
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+  @@map("cart_items")
+}
+
+// ---------------------------------------------------------------------------
+// Pesanan & pembayaran
+// ---------------------------------------------------------------------------
+
+/// Alur normal pesanan, berurutan dari atas ke bawah.
+/// Dua nilai terakhir adalah jalan keluar bila pesanan tidak selesai.
+enum OrderStatus {
+  WAITING_PAYMENT // menunggu pembayaran
+  PAYMENT_SUCCESS // sudah dibayar, siap dikemas
+  PROCESS_ORDER // sedang dikemas di gudang
+  ORDER_SEND // sudah diserahkan ke kurir
+  ORDER_RECEIPT // diterima pembeli, pesanan selesai
+  ORDER_CANCELLED // dibatalkan admin atau pembayaran ditolak
+  PAYMENT_EXPIRED // lewat batas waktu bayar
+}
+
+enum PaymentStatus {
+  MENUNGGU
+  LUNAS
+  GAGAL
+  KEDALUWARSA
+  DITANTANG // fraud review Midtrans (`challenge`) — perlu keputusan manual
+  DIKEMBALIKAN
+}
+
+model Order {
+  id    String @id @default(uuid())
+  /// Nomor yang dilihat pembeli, mis. INV-20260814-0001
+  nomor String @unique
+  /// Token acak untuk membuka halaman status tanpa login.
+  token String @unique
+
+  status OrderStatus @default(WAITING_PAYMENT)
+
+  // --- Data pembeli ---
+  // Tetap disalin apa adanya meski pesanan terikat akun: pembeli boleh
+  // mengirim ke nama/nomor orang lain, dan riwayat pesanan tidak boleh berubah
+  // ketika profil akunnya nanti disunting.
+  namaPembeli    String
+  emailPembeli   String
+  teleponPembeli String
+
+  /// Kosong untuk guest checkout. Diisi bila pembeli memesan sambil masuk,
+  /// atau saat pesanan tamu diklaim ke akun dengan email yang sama.
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // --- Alamat pengiriman ---
+  alamatLengkap String
+  provinsi      String
+  kota          String
+  kecamatan     String?
+  kodePos       String
+  catatanAlamat String?
+
+  // --- Pengiriman ---
+  kurir          String // mis. "JNE"
+  layananKurir   String // mis. "REG"
+  namaLayanan    String // mis. "Reguler (2-3 hari)"
+  estimasiTiba   String?
+  beratTotal     Int // gram
+  nomorResi      String?
+  penyediaOngkir String  @default("tarif-lokal") // "biteship" | "tarif-lokal"
+
+  // --- Nilai uang (Rupiah utuh) ---
+  subtotal     Int
+  ongkir       Int
+  diskon       Int     @default(0)
+  /// Kode voucher yang dipakai, disimpan apa adanya untuk audit — voucher
+  /// bisa saja dihapus admin kemudian, tapi pesanannya harus tetap terbaca.
+  kodeVoucher  String?
+  /// Potongan dari penukaran poin, terpisah dari `diskon` voucher supaya
+  /// laporan bisa memisahkan biaya promo dari biaya program loyalty.
+  poinDipakai  Int     @default(0)
+  potonganPoin Int     @default(0)
+  total        Int
+
+  // --- Pembayaran ---
+  statusPembayaran PaymentStatus @default(MENUNGGU)
+  midtransOrderId  String?       @unique
+  snapToken        String?
+  snapRedirectUrl  String?
+  metodePembayaran String? // diisi dari webhook: "qris", "bank_transfer", dst.
+  dibayarPada      DateTime?
+  /// Batas waktu bayar. Lewat ini order otomatis jadi KEDALUWARSA & stok dilepas.
+  kedaluwarsaPada  DateTime
+
+  /// Penanda agar stok hanya pernah dikurangi satu kali, meski webhook
+  /// Midtrans dikirim berulang (webhook bisa datang lebih dari sekali).
+  stokSudahDikurangi Boolean @default(false)
+
+  // --- Atribusi iklan ---
+  // Direkam saat pembeli mendarat dari iklan, supaya belanja iklan bisa
+  // dinilai dari penjualan nyata, bukan dari klik saja.
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  /// Slug landing page tempat pembeli mendarat, bila ada.
+  landingSlug String?
+
+  items      OrderItem[]
+  mutasiPoin PointLedger[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([statusPembayaran, kedaluwarsaPada])
+  @@index([customerId, createdAt])
+  @@index([emailPembeli])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Relasi dipertahankan untuk pelaporan, tapi boleh null bila produknya
+  // kelak dihapus — riwayat pesanan tidak boleh ikut hilang.
+  productId String?
+  product   Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  // Salinan data produk saat dibeli. Perubahan harga/nama di katalog
+  // setelahnya tidak boleh mengubah isi pesanan yang sudah jadi.
+  namaProduk String
+  namaVarian String?
+  sku        String
+  gambarUrl  String?
+  harga      Int
+  jumlah     Int
+  subtotal   Int
+  berat      Int // gram per satuan
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// ---------------------------------------------------------------------------
+// Landing page kampanye iklan
+// ---------------------------------------------------------------------------
+
+enum LandingStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LandingBlockType {
+  HERO
+  PRODUK
+  KEUNGGULAN
+  TESTIMONI
+  FAQ
+  HITUNG_MUNDUR
+  CTA
+  TEKS
+}
+
+/// Halaman kampanye berdiri sendiri di /lp/{slug}, tanpa navigasi toko.
+/// Dipakai sebagai tujuan iklan Meta/Google.
+model LandingPage {
+  id     String        @id @default(uuid())
+  /// Nama internal, hanya terlihat admin.
+  nama   String
+  slug   String        @unique
+  status LandingStatus @default(DRAFT)
+
+  // --- Pratinjau tautan & SEO ---
+  judulMeta     String?
+  deskripsiMeta String?
+  gambarOg      String?
+
+  // --- Tracking, diisi per kampanye ---
+  metaPixelId    String? // 15-16 digit
+  ga4Id          String? // G-XXXXXXX
+  googleAdsId    String? // AW-XXXXXXXXX
+  googleAdsLabel String? // label konversi untuk event Purchase
+  gtmId          String? // GTM-XXXXXXX
+
+  /// Warna aksen tombol & sorotan, agar tiap kampanye bisa beda nuansa.
+  warnaAksen String @default("#c96442")
+
+  mulaiTayang   DateTime?
+  selesaiTayang DateTime?
+
+  blok LandingBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, slug])
+  @@map("landing_pages")
+}
+
+model LandingBlock {
+  id            String      @id @default(uuid())
+  landingPageId String
+  landingPage   LandingPage @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+
+  tipe   LandingBlockType
+  urutan Int
+  aktif  Boolean          @default(true)
+
+  /// Isi blok. Bentuknya berbeda per `tipe`, divalidasi skema Zod di
+  /// src/landing/blok.skema.ts sebelum disimpan — Json di sini hanyalah
+  /// penyimpanannya, bukan izin menyimpan apa pun.
+  konten Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([landingPageId, urutan])
+  @@map("landing_blocks")
+}
+
+// ---------------------------------------------------------------------------
+// Konten promosi
+// ---------------------------------------------------------------------------
+
+/// Banner slider di halaman home. Dikelola admin lewat /admin/banner.
+model Banner {
+  id       String  @id @default(uuid())
+  judul    String
+  subjudul String?
+
+  gambarUrl       String // dipakai di desktop & fallback mobile
+  gambarMobileUrl String? // opsional, potongan khusus layar sempit
+
+  teksTombol   String? // contoh: "Belanja Sekarang"
+  tautanTombol String? // contoh: "/produk?kategori=aksesoris"
+
+  urutan Int     @default(0)
+  aktif  Boolean @default(true)
+
+  // Jadwal tayang opsional untuk promo musiman.
+  // Kosong = tayang terus selama `aktif`.
+  mulaiTayang   DateTime?
+  selesaiTayang DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([aktif, urutan])
+  @@map("banners")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// Kosong = gambar umum produk (perilaku lama, dipakai semua varian).
+  /// Terisi = gambar khusus varian tersebut, ditampilkan begitu pembeli
+  /// memilihnya. Satu kolom nullable, bukan tabel terpisah, supaya galeri yang
+  /// sudah ada tetap bekerja tanpa perlu memindahkan data lama.
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  url    String
+  alt    String?
+  urutan Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId, urutan])
+  @@index([variantId, urutan])
+  @@map("product_images")
+}
+
+// ---------------------------------------------------------------------------
+// Pelanggan & Loyalty
+//
+// Mengacu pada research/business/09-marketing-promotion.md (poin, tier) dan
+// research/tech/04-authentication-security.md.
+//
+// Guest checkout tetap didukung: Order.customerId boleh kosong. Akun hanya
+// menambah kenyamanan (buku alamat, riwayat, poin), bukan syarat belanja.
+// ---------------------------------------------------------------------------
+
+enum CustomerTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+enum PointType {
+  EARN // dari pesanan yang sudah diterima pembeli
+  REDEEM // dipakai sebagai potongan di checkout
+  TO_VOUCHER // ditukar jadi kode voucher
+  ADJUST // penyesuaian manual oleh admin
+  REFUND // dikembalikan karena pesanan batal setelah poin terpakai
+}
+
+model Customer {
+  id           String  @id @default(uuid())
+  email        String  @unique
+  nama         String
+  telepon      String?
+  passwordHash String
+
+  aktif Boolean @default(true)
+
+  /// Saldo poin yang siap dipakai. Sengaja didenormalisasi dari ledger agar
+  /// checkout tidak perlu menjumlah seluruh riwayat, tapi ledger tetap jadi
+  /// sumber kebenaran bila keduanya berselisih.
+  poin Int @default(0)
+
+  tier CustomerTier @default(BRONZE)
+
+  /// Total belanja 12 bulan terakhir (Rupiah) — dasar penentuan tier.
+  /// Dihitung ulang setiap kali poin dikreditkan.
+  belanja12Bulan Int @default(0)
+
+  lastLoginAt DateTime?
+
+  alamat     CustomerAddress[]
+  orders     Order[]
+  mutasiPoin PointLedger[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tier, createdAt])
+  @@map("customers")
+}
+
+model CustomerAddress {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// Nama panggilan alamat, mis. "Rumah" atau "Kantor".
+  label           String
+  namaPenerima    String
+  teleponPenerima String
+
+  alamatLengkap String
+  provinsi      String
+  kota          String
+  kecamatan     String?
+  kodePos       String
+  catatan       String?
+
+  utama Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId, utama])
+  @@map("customer_addresses")
+}
+
+/// Buku besar poin — hanya ditambah, tidak pernah diubah atau dihapus.
+/// Setiap perubahan saldo wajib meninggalkan satu baris di sini supaya selisih
+/// saldo selalu bisa ditelusuri sampai penyebabnya.
+model PointLedger {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  tipe         PointType
+  /// Positif menambah saldo, negatif mengurangi.
+  jumlah       Int
+  /// Saldo sesudah mutasi ini — memudahkan audit tanpa menjumlah ulang.
+  saldoSesudah Int
+
+  /// Pesanan pemicu, bila ada. Unik bersama tipe agar satu pesanan tidak bisa
+  /// menghasilkan dua kali poin meski sinkronisasi status berjalan berulang.
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  /// Kode voucher hasil penukaran, bila tipenya TO_VOUCHER.
+  kodeVoucher String?
+
+  keterangan String
+
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, tipe])
+  @@index([customerId, createdAt])
+  @@map("point_ledger")
+}

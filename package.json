@@ -1,0 +1,28 @@
+{
+  "name": "e-commerce",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test --workspace apps/api",
+    "test:web": "npm run test --workspace apps/web",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate --workspace apps/api",
+    "db:seed": "npm run db:seed --workspace apps/api",
+    "db:studio": "npm run db:studio --workspace apps/api",
+    "tunnel": "bash scripts/tunnel-webhook.sh",
+    "cari-area": "node scripts/cari-area-biteship.mjs",
+    "impor-produk": "node scripts/impor-produk.mjs",
+    "buat-ikon": "node scripts/buat-ikon.mjs"
+  }
+}

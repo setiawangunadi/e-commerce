@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  // Hanya src/ yang dikompilasi ke dist.
+  //
+  // tsconfig.json juga menyertakan prisma.config.ts (dibutuhkan Prisma CLI dan
+  // typecheck). Bila berkas itu ikut di-build, rootDir naik ke akar paket dan
+  // hasilnya menjadi dist/src/main.js — sementara skrip `start` memanggil
+  // dist/main. Deploy baru gagal saat proses dinyalakan, bukan saat build.
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "prisma", "prisma.config.ts", "**/*.test.ts"]
+}

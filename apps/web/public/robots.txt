@@ -1,0 +1,19 @@
+# Etalase boleh diindeks sepenuhnya — trafik organik adalah tujuannya.
+User-agent: *
+Allow: /
+
+# Halaman yang tidak pernah berguna di hasil pencarian, dan sebagiannya berisi
+# data pribadi pembeli. Ini bukan pengganti kontrol akses: panel admin dijaga
+# guard API, dan halaman status pesanan hanya bisa dibuka lewat token.
+Disallow: /admin
+Disallow: /akun
+Disallow: /keranjang
+Disallow: /checkout
+Disallow: /pesanan/
+Disallow: /masuk
+Disallow: /daftar
+
+# Hasil pencarian internal tidak boleh ikut terindeks — isinya duplikat
+# halaman katalog dan menghabiskan anggaran crawl.
+Disallow: /cari
+Disallow: /produk?*

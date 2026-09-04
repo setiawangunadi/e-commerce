@@ -1,0 +1,90 @@
+# Rakitan produksi satu mesin: Postgres + API + etalase.
+#
+# Menjalankan:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# Berkas ini cocok untuk satu VPS. Bila trafik sudah menuntut lebih dari satu
+# instance API, dua hal harus dipindahkan lebih dulu:
+#   1. Cron penutup pesanan kedaluwarsa (in-process) → BullMQ, agar tidak
+#      berjalan ganda di setiap instance.
+#   2. Penyimpanan pembatasan laju (in-memory) → Redis, agar batasnya global.
+#
+# Reverse proxy dengan TLS (Caddy/nginx/Traefik) diletakkan di depan compose ini
+# dan meneruskan ke web:3000 serta api:4000. TRUST_PROXY harus mencerminkan
+# berapa lapis proxy yang ada di depannya.
+
+name: toko
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?wajib diisi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?wajib diisi}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Sengaja TIDAK memublikasikan port ke host: database hanya perlu dijangkau
+    # dari jaringan compose ini.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-ecommerce}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
+      JWT_SECRET: ${JWT_SECRET:?wajib diisi}
+      WEB_ORIGIN: ${WEB_ORIGIN:?wajib diisi}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?wajib diisi}
+      UPLOAD_DIR: /data/uploads
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY}
+      MIDTRANS_PRODUKSI: ${MIDTRANS_PRODUKSI:-true}
+      BATAS_BAYAR_MENIT: ${BATAS_BAYAR_MENIT:-1440}
+      BITESHIP_API_KEY: ${BITESHIP_API_KEY:-}
+      GUDANG_AREA_ID: ${GUDANG_AREA_ID:-}
+      GUDANG_KODE_POS: ${GUDANG_KODE_POS:-}
+      RATE_LIMIT_UMUM: ${RATE_LIMIT_UMUM:-300}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-10}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    volumes:
+      # Gambar produk WAJIB berada di volume. Tanpa ini, seluruh gambar hilang
+      # setiap kali container dibangun ulang.
+      - uploads:/data/uploads
+    ports:
+      - '127.0.0.1:4000:4000'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* ter-inline saat build, jadi harus diberikan di sini —
+      # menaruhnya di `environment` tidak akan berpengaruh.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?wajib diisi}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?wajib diisi}
+        NEXT_PUBLIC_NAMA_TOKO: ${NEXT_PUBLIC_NAMA_TOKO:-Nusakara}
+        NEXT_PUBLIC_TAGLINE_TOKO: ${NEXT_PUBLIC_TAGLINE_TOKO:-Perlengkapan harian buatan lokal}
+        NEXT_PUBLIC_WHATSAPP: ${NEXT_PUBLIC_WHATSAPP:-6281234567890}
+        NEXT_PUBLIC_MIDTRANS_PRODUKSI: ${NEXT_PUBLIC_MIDTRANS_PRODUKSI:-true}
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  postgres-data:
+  uploads:

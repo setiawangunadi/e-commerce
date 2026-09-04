@@ -1,0 +1,30 @@
+node_modules
+**/node_modules
+.git
+.github
+.claude
+
+dist
+.next
+out
+build
+coverage
+*.tsbuildinfo
+
+# Rahasia tidak pernah ikut ke dalam image — semuanya lewat environment
+# variable saat container dijalankan.
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Unggahan development; di produksi gambar ada di object storage / volume.
+apps/api/uploads
+
+research
+docs
+*.md
+!README.md
+
+.DS_Store
+*.log

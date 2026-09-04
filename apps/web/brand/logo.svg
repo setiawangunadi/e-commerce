@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SRN Cullezione">
+  <title>SRN Cullezione</title>
+  <circle cx="256" cy="256" r="256" fill="#f5b301"/>
+  <!-- Monogram: S dan R navy, N teal — pembagian warna mengikuti logo asli.
+       letter-spacing negatif meniru huruf yang saling merapat. -->
+  <text x="256" y="298" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-weight="700"
+        font-size="196" letter-spacing="-14">
+    <tspan fill="#123d5b">S</tspan><tspan fill="#123d5b">R</tspan><tspan fill="#1b7f97">N</tspan>
+  </text>
+  <text x="256" y="388" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-style="italic"
+        font-size="56" fill="#123d5b">Cullezione</text>
+</svg>
